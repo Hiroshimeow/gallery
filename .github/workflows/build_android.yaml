@@ -1,33 +1,71 @@
-  name: Build Android APK
-  
-  on:
-    workflow_dispatch:
-    push:
-      branches: [ "main" ]
-      paths:
-        - 'Android/**'
-    pull_request:
-      branches: [ "main" ]
-      paths:
-        - 'Android/**'
-  
-  jobs:
-    build_apk:
-      name: Build Android APK
-      runs-on: ubuntu-latest
-      defaults:
-        run:
-          working-directory: ./Android/src
-      steps:
-        - name: Checkout the source code
-          uses: actions/checkout@v3
-        - uses: actions/setup-java@v4
-          with:
-            distribution: 'temurin'
-            java-version: '21'
-        - name: Install Android SDK Platform 37
-          run: echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-37.0"
-        - name: Build
-          run: ./gradlew assembleRelease
-  
-  
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["pr-1217-local-api"]
+    paths:
+      - "Android/**"
+      - ".github/workflows/build_android.yaml"
+
+permissions:
+  contents: write
+
+jobs:
+  build_apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./Android/src
+    steps:
+      - name: Checkout the source code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android SDK Platform 37
+        run: echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-37.0"
+
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease
+
+      - name: Package APK
+        id: package
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="Android/src/app/build/outputs/apk/release/app-release.apk"
+          test -f "$src"
+          short_sha="${GITHUB_SHA::8}"
+          apk="gallery-pr1217-v1.0.20-${short_sha}.apk"
+          cp "$src" "$apk"
+          sha256sum "$apk" | tee "$apk.sha256"
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gallery-pr1217-apk
+          path: |
+            ${{ steps.package.outputs.apk }}
+            ${{ steps.package.outputs.apk }}.sha256
+
+      - name: Publish test release
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="pr1217-latest"
+          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create "$tag"             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "PR #1217 Local API Server - Test APK"             --notes "Built from google-ai-edge/gallery PR #1217 Android source. Fork branch: pr-1217-local-api. Android source matches upstream PR head f3c682d6987c34fe56409c58d00fb56756cc0180; the only fork-only change is this CI packaging workflow."             --prerelease             "${{ steps.package.outputs.apk }}"             "${{ steps.package.outputs.apk }}.sha256"
