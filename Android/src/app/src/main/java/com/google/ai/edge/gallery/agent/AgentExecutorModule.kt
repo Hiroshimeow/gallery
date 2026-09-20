@@ -54,6 +54,7 @@ internal object AgentExecutorModule {
         providerSource = providerRepository,
         gateway = openAiGateway,
         mcpToolRunner = null,
+        llmSessionManager = llmSessionManager,
       )
     return RoutingAgentRuntimeExecutor(local = local, remote = remote)
   }

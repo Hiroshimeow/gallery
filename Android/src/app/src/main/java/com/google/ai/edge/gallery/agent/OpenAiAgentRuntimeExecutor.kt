@@ -6,6 +6,7 @@
 package com.google.ai.edge.gallery.agent
 
 import android.content.Context
+import com.google.ai.edge.gallery.agent.sessions.LlmSessionManager
 import com.google.ai.edge.gallery.agent.sessions.generateSessionId
 import com.google.ai.edge.gallery.remote.OPENAI_JSON
 import com.google.ai.edge.gallery.remote.OpenAiChatGateway
@@ -34,6 +35,7 @@ class OpenAiAgentRuntimeExecutor(
   private val providerSource: OpenAiProviderSource,
   private val gateway: OpenAiChatGateway,
   private val mcpToolRunner: RemoteMcpToolRunner?,
+  private val llmSessionManager: LlmSessionManager? = null,
 ) : AgentRuntimeExecutor {
   private data class RemoteSession(
     val config: AgentRuntimeConfig,
@@ -77,7 +79,7 @@ class OpenAiAgentRuntimeExecutor(
     requireNotNull(providerSource.findById(providerId)) {
       "Remote provider not found: " + providerId
     }
-    val sessionId = config.sessionId.ifEmpty { generateSessionId() }
+    val sessionId = config.sessionId.ifEmpty { llmSessionManager?.activeSessionId ?: generateSessionId() }
     val messages = mutableListOf<OpenAiMessage>()
     config.systemInstruction?.takeIf { it.isNotBlank() }?.let {
       messages += OpenAiMessage(role = "system", content = it)
@@ -91,6 +93,7 @@ class OpenAiAgentRuntimeExecutor(
       )
     )
     config.model.instance = RemoteModelInstance
+    llmSessionManager?.activeSessionId = sessionId
   }
 
   override fun executeStream(

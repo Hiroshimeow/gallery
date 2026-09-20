@@ -272,6 +272,7 @@ internal object AgentChatTaskModule {
         providerSource = providerRepository,
         gateway = openAiGateway,
         mcpToolRunner = GalleryRemoteMcpToolRunner(agentTools),
+        llmSessionManager = llmSessionManager,
       )
     return RoutingAgentRuntimeExecutor(local = local, remote = remote)
   }
