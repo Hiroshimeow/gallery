@@ -72,7 +72,7 @@ fun RemoteProviderSettings(modelManagerViewModel: ModelManagerViewModel) {
     verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Text(
-      "Remote providers",
+      "Remote providers · OpenAI/MCP build",
       style = MaterialTheme.typography.titleSmall,
     )
     Text(

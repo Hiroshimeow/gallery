@@ -510,7 +510,11 @@ fun HomeScreen(
         )
       },
       title = { Text(uiState.loadingModelAllowlistError) },
-      text = { Text(stringResource(R.string.error_internet_connection)) },
+      text = {
+        Text(
+          "The local model catalog is unavailable. Remote OpenAI-compatible providers can still be configured and used."
+        )
+      },
       onDismissRequest = { modelManagerViewModel.loadModelAllowlist() },
       confirmButton = {
         TextButton(onClick = { modelManagerViewModel.loadModelAllowlist() }) {
