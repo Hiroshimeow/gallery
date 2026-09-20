@@ -75,6 +75,9 @@ import com.google.ai.edge.gallery.proto.AccessTokenData
 import com.google.ai.edge.gallery.proto.HfModelItemProto
 import com.google.ai.edge.gallery.proto.ImportedModel
 import com.google.ai.edge.gallery.proto.Theme
+import com.google.ai.edge.gallery.remote.OpenAiProvider
+import com.google.ai.edge.gallery.remote.OpenAiProviderRepository
+import com.google.ai.edge.gallery.remote.remoteModelsForTask
 import com.google.ai.edge.gallery.runtime.aicore.AICoreModelHelper
 import com.google.ai.edge.litertlm.Contents
 import com.google.gson.Gson
@@ -217,6 +220,7 @@ constructor(
   private val localApiServerPreferences: LocalApiServerPreferences,
   private val modelCatalogCache: ModelCatalogCache,
   private val apiServerSessionHold: ApiServerSessionHold,
+  private val openAiProviderRepository: OpenAiProviderRepository,
   @ApplicationContext private val context: Context,
 ) :
   ViewModel()
@@ -225,9 +229,55 @@ constructor(
   private val modelsDir = getModelStorageDir(context)
   protected val _uiState = MutableStateFlow(createEmptyUiState())
   open val uiState = _uiState.asStateFlow()
+  private val _remoteProviders = MutableStateFlow<List<OpenAiProvider>>(emptyList())
+  val remoteProviders = _remoteProviders.asStateFlow()
 
   init {
     viewModelScope.launch { uiState.collect { modelCatalogCache.update(getAllDownloadedModels()) } }
+    viewModelScope.launch {
+      openAiProviderRepository.providers.collect { providers ->
+        _remoteProviders.value = providers
+        if (!_uiState.value.loadingModelAllowlist && _uiState.value.tasks.isNotEmpty()) {
+          applyRemoteModels(providers, updateUiState = true)
+        }
+      }
+    }
+  }
+
+  fun saveRemoteProvider(provider: OpenAiProvider, onError: (String) -> Unit = {}) {
+    viewModelScope.launch {
+      runCatching { openAiProviderRepository.save(provider) }
+        .onFailure { onError(it.message ?: "Failed to save provider") }
+    }
+  }
+
+  fun deleteRemoteProvider(id: String) {
+    viewModelScope.launch { openAiProviderRepository.delete(id) }
+  }
+
+  private fun applyRemoteModels(providers: List<OpenAiProvider>, updateUiState: Boolean) {
+    val tasks = getActiveCustomTasks().map { it.task }
+    val oldRemoteNames = tasks.flatMap { task -> task.models.filter { it.isRemoteOpenAi }.map { it.name } }
+    for (task in tasks) {
+      task.models.removeAll { it.isRemoteOpenAi }
+      val remoteModels = remoteModelsForTask(task.id, providers)
+      remoteModels.forEach { it.preProcess() }
+      task.models.addAll(remoteModels)
+    }
+    if (!updateUiState) return
+
+    val statuses = _uiState.value.modelDownloadStatus.toMutableMap()
+    oldRemoteNames.forEach { statuses.remove(it) }
+    tasks.flatMap { it.models }.filter { it.isRemoteOpenAi }.forEach { model ->
+      statuses[model.name] = ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
+    }
+    _uiState.update {
+      it.copy(
+        tasks = tasks.toList(),
+        tasksByCategory = groupTasksByCategory(),
+        modelDownloadStatus = statuses,
+      )
+    }
   }
 
   fun fetchModelDetails(modelId: String, onResult: (HfModelItemProto?) -> Unit) {
@@ -318,7 +368,8 @@ constructor(
   open fun getAllDownloadedModels(): List<Model> {
     return getAllModels().filter {
       uiState.value.modelDownloadStatus[it.name]?.status == ModelDownloadStatusType.SUCCEEDED &&
-        it.isLlm
+        it.isLlm &&
+        !it.isRemoteOpenAi
     }
   }
 
@@ -1436,6 +1487,9 @@ constructor(
           }
         }
 
+        // Add configured remote providers after the local allowlist has populated task models.
+        applyRemoteModels(openAiProviderRepository.readAll(), updateUiState = false)
+
         // Process all tasks.
         Log.d(TAG, "loadModelAllowlist: Processing tasks")
         processTasks()
@@ -1773,6 +1827,10 @@ constructor(
    */
   fun getModelDownloadStatus(model: Model): ModelDownloadStatus {
     Log.d(TAG, "Checking model ${model.name} download status...")
+
+    if (model.isRemoteOpenAi) {
+      return ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED)
+    }
 
     if (model.downloadInfo.localRelativeDirPathOverride.isNotEmpty()) {
       Log.d(TAG, "Model has localRelativeDirPathOverride set. Set status to SUCCEEDED")

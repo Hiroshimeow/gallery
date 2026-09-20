@@ -26,6 +26,8 @@ import com.google.ai.edge.gallery.agent.AgentChatExecutor
 import com.google.ai.edge.gallery.agent.AgentRuntimeConfig
 import com.google.ai.edge.gallery.agent.AgentRuntimeExecutor
 import com.google.ai.edge.gallery.agent.DefaultAgentRuntimeExecutor
+import com.google.ai.edge.gallery.agent.OpenAiAgentRuntimeExecutor
+import com.google.ai.edge.gallery.agent.RoutingAgentRuntimeExecutor
 import com.google.ai.edge.gallery.agent.PromptExpander
 import com.google.ai.edge.gallery.agent.sessions.LlmSessionManager
 import com.google.ai.edge.gallery.apiserver.ApiServerSessionHold
@@ -36,6 +38,9 @@ import com.google.ai.edge.gallery.data.Category
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.proto.McpServers
+import com.google.ai.edge.gallery.remote.GalleryRemoteMcpToolRunner
+import com.google.ai.edge.gallery.remote.KtorOpenAiChatGateway
+import com.google.ai.edge.gallery.remote.OpenAiProviderRepository
 import com.google.ai.edge.gallery.skills.SkillManager
 import com.google.ai.edge.gallery.skills.SkillsProvider
 import com.google.ai.edge.gallery.skills.formatSelectedSkills
@@ -99,6 +104,18 @@ const val DEFAULT_SYSTEM_PROMPT =
   """
 
 val DEFAULT_SYSTEM_PROMPT_TRIMMED = DEFAULT_SYSTEM_PROMPT.trimIndent()
+
+const val REMOTE_MCP_SYSTEM_PROMPT =
+  """
+  You are an AI assistant. Answer the user directly when no tool is needed.
+
+  When a tool is needed, use the runMcpTool function with the exact MCP tool name and a JSON input string that matches that tool's schema. After receiving the tool result, continue until you can answer the user.
+
+  --- MCP TOOLS ---
+  ___TOOLS___
+  """
+
+val REMOTE_MCP_SYSTEM_PROMPT_TRIMMED = REMOTE_MCP_SYSTEM_PROMPT.trimIndent()
 
 // The default system prompt for the agent chat task with only skills.
 const val DEFAULT_SYSTEM_PROMPT_SKILLS_ONLY =
@@ -167,7 +184,11 @@ constructor(
       // Determine base system prompt based on whether MCP tools are enabled.
       val toolsPrompt = agentTools.mcpManagerViewModel.getToolsPrompt()
       val baseSystemPrompt =
-        getEffectiveBaseSystemPrompt(initialSystemPrompt, toolsPrompt.isNotEmpty())
+        if (model.isRemoteOpenAi) {
+          REMOTE_MCP_SYSTEM_PROMPT_TRIMMED
+        } else {
+          getEffectiveBaseSystemPrompt(initialSystemPrompt, toolsPrompt.isNotEmpty())
+        }
 
       // TODO: inject prompt expander as a dependency.
       val finalSystemPrompt =
@@ -235,14 +256,24 @@ internal object AgentChatTaskModule {
     agentTools: AgentTools,
     llmSessionManager: LlmSessionManager,
     apiServerSessionHold: ApiServerSessionHold,
+    providerRepository: OpenAiProviderRepository,
+    openAiGateway: KtorOpenAiChatGateway,
   ): AgentRuntimeExecutor {
-    return DefaultAgentRuntimeExecutor(
-      skillsProvider = skillManager,
-      toolsProvider = agentTools,
-      toolDispatcher = RuntimeToolDispatcher(),
-      llmSessionManager = llmSessionManager,
-      apiServerSessionHold = apiServerSessionHold,
-    )
+    val local =
+      DefaultAgentRuntimeExecutor(
+        skillsProvider = skillManager,
+        toolsProvider = agentTools,
+        toolDispatcher = RuntimeToolDispatcher(),
+        llmSessionManager = llmSessionManager,
+        apiServerSessionHold = apiServerSessionHold,
+      )
+    val remote =
+      OpenAiAgentRuntimeExecutor(
+        providerSource = providerRepository,
+        gateway = openAiGateway,
+        mcpToolRunner = GalleryRemoteMcpToolRunner(agentTools),
+      )
+    return RoutingAgentRuntimeExecutor(local = local, remote = remote)
   }
 
   @Provides

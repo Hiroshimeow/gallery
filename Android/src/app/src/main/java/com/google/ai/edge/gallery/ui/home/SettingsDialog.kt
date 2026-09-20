@@ -232,6 +232,8 @@ fun SettingsDialog(
               )
             }
 
+          RemoteProviderSettings(modelManagerViewModel = modelManagerViewModel)
+
           // Local API server toggle.
           var localApiServerEnabled by remember { mutableStateOf(false) }
           var localApiServerPort by remember { mutableStateOf(8080) }

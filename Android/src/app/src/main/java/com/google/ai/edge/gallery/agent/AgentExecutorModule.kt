@@ -18,6 +18,8 @@ package com.google.ai.edge.gallery.agent
 
 import com.google.ai.edge.gallery.agent.sessions.LlmSessionManager
 import com.google.ai.edge.gallery.apiserver.ApiServerSessionHold
+import com.google.ai.edge.gallery.remote.KtorOpenAiChatGateway
+import com.google.ai.edge.gallery.remote.OpenAiProviderRepository
 import com.google.ai.edge.gallery.skills.NoOpSkillsProvider
 import com.google.ai.edge.gallery.tools.RuntimeToolDispatcher
 import com.google.ai.edge.gallery.tools.RuntimeToolsProvider
@@ -36,14 +38,24 @@ internal object AgentExecutorModule {
   fun provideAiChatExecutor(
     llmSessionManager: LlmSessionManager,
     apiServerSessionHold: ApiServerSessionHold,
+    providerRepository: OpenAiProviderRepository,
+    openAiGateway: KtorOpenAiChatGateway,
   ): AgentRuntimeExecutor {
-    return DefaultAgentRuntimeExecutor(
-      skillsProvider = NoOpSkillsProvider(),
-      toolsProvider = RuntimeToolsProvider(),
-      toolDispatcher = RuntimeToolDispatcher(),
-      llmSessionManager = llmSessionManager,
-      apiServerSessionHold = apiServerSessionHold,
-    )
+    val local =
+      DefaultAgentRuntimeExecutor(
+        skillsProvider = NoOpSkillsProvider(),
+        toolsProvider = RuntimeToolsProvider(),
+        toolDispatcher = RuntimeToolDispatcher(),
+        llmSessionManager = llmSessionManager,
+        apiServerSessionHold = apiServerSessionHold,
+      )
+    val remote =
+      OpenAiAgentRuntimeExecutor(
+        providerSource = providerRepository,
+        gateway = openAiGateway,
+        mcpToolRunner = null,
+      )
+    return RoutingAgentRuntimeExecutor(local = local, remote = remote)
   }
 
   @Provides
