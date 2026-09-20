@@ -82,6 +82,7 @@ class OpenAiAgentRuntimeExecutor(
     config.systemInstruction?.takeIf { it.isNotBlank() }?.let {
       messages += OpenAiMessage(role = "system", content = it)
     }
+    messages += config.initialTextMessages.map { OpenAiMessage(role = it.role, content = it.content) }
     activeSession.set(
       RemoteSession(
         config = config,

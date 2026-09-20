@@ -37,6 +37,8 @@ import kotlinx.coroutines.channels.SendChannel
  *   turn.
  * @property initialMessages Messages used to seed or reinitialize conversation history upon reset.
  */
+data class AgentTextMessage(val role: String, val content: String)
+
 data class AgentRuntimeConfig(
   val model: Model,
   val taskId: String,
@@ -47,4 +49,5 @@ data class AgentRuntimeConfig(
   val enableConversationConstrainedDecoding: Boolean = false,
   val systemInstruction: String? = null,
   val initialMessages: List<Message> = listOf(),
+  val initialTextMessages: List<AgentTextMessage> = listOf(),
 )

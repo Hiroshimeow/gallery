@@ -26,6 +26,7 @@ import com.google.ai.edge.gallery.agent.AgentExecutionContext
 import com.google.ai.edge.gallery.agent.AgentRequest
 import com.google.ai.edge.gallery.agent.AgentRuntimeConfig
 import com.google.ai.edge.gallery.agent.AgentRuntimeExecutor
+import com.google.ai.edge.gallery.agent.AgentTextMessage
 import com.google.ai.edge.gallery.agent.AiChatExecutor
 import com.google.ai.edge.gallery.agent.Attachment
 import com.google.ai.edge.gallery.agent.sessions.LlmSessionManager
@@ -66,6 +67,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 private const val TAG = "AGLlmChatViewModel"
+
+private fun ChatMessageText.toAgentTextMessage(): AgentTextMessage? =
+  when (side) {
+    ChatSide.USER -> AgentTextMessage(role = "user", content = content)
+    ChatSide.AGENT -> AgentTextMessage(role = "assistant", content = content)
+    ChatSide.SYSTEM -> null
+  }
 
 @OptIn(ExperimentalApi::class)
 open class LlmChatViewModelBase(
@@ -188,11 +196,12 @@ open class LlmChatViewModelBase(
 
       if (sessionStoppedByModel[model.name] == true) {
         sessionStoppedByModel[model.name] = false
-        val initialMessages =
+        val historyMessages =
           (uiState.value.messagesByModel[model.name] ?: emptyList())
             .filterIsInstance<ChatMessageText>()
             .dropLast(1)
-            .mapNotNull { convertToLitertMessage(it) }
+        val initialMessages = historyMessages.mapNotNull { convertToLitertMessage(it) }
+        val initialTextMessages = historyMessages.mapNotNull { it.toAgentTextMessage() }
         val config =
           AgentRuntimeConfig(
             model = model,
@@ -201,6 +210,7 @@ open class LlmChatViewModelBase(
             supportAudio = model.supportAudio,
             systemInstruction = _uiSystemPrompt.value.ifEmpty { null },
             initialMessages = initialMessages,
+            initialTextMessages = initialTextMessages,
           )
         runtimeExecutor.resetSession(config = config)
       }
@@ -357,6 +367,7 @@ open class LlmChatViewModelBase(
     onDone: () -> Unit = {},
     enableConversationConstrainedDecoding: Boolean = false,
     initialMessages: List<Message> = listOf(),
+    initialTextMessages: List<AgentTextMessage> = listOf(),
     clearHistory: Boolean = true,
   ) {
     currentTaskId = task.id
@@ -373,6 +384,7 @@ open class LlmChatViewModelBase(
           onDone = onDone,
           enableConversationConstrainedDecoding = enableConversationConstrainedDecoding,
           initialMessages = initialMessages,
+          initialTextMessages = initialTextMessages,
           clearHistory = clearHistory,
         )
       }
@@ -388,6 +400,7 @@ open class LlmChatViewModelBase(
     onDone: () -> Unit = {},
     enableConversationConstrainedDecoding: Boolean = false,
     initialMessages: List<Message> = listOf(),
+    initialTextMessages: List<AgentTextMessage> = listOf(),
     clearHistory: Boolean = true,
   ) {
     setIsResettingSession(true)
@@ -410,6 +423,7 @@ open class LlmChatViewModelBase(
           enableConversationConstrainedDecoding = enableConversationConstrainedDecoding,
           systemInstruction = systemInstruction,
           initialMessages = initialMessages,
+          initialTextMessages = initialTextMessages,
         )
       runtimeExecutor.resetSession(config = config)
 
@@ -458,6 +472,7 @@ open class LlmChatViewModelBase(
           setRestoredMessages(model = model, messages = messages)
 
           val litertMessages = messages.mapNotNull { convertToLitertMessage(it) }
+          val textMessages = messages.filterIsInstance<ChatMessageText>().mapNotNull { it.toAgentTextMessage() }
           executeResetSession(
             task = task,
             model = model,
@@ -465,6 +480,7 @@ open class LlmChatViewModelBase(
             supportImage = supportImage,
             supportAudio = supportAudio,
             initialMessages = litertMessages,
+            initialTextMessages = textMessages,
             clearHistory = false,
             onDone = onDone,
           )

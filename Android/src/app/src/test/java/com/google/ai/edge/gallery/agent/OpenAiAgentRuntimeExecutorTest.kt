@@ -44,6 +44,46 @@ class OpenAiAgentRuntimeExecutorTest {
     )
 
   @Test
+  fun `restored text history is sent before the next remote user turn`() = runBlocking {
+    val gateway =
+      ScriptedGateway(
+        listOf(
+          listOf(
+            OpenAiCompletionEvent.TextDelta("continued"),
+            OpenAiCompletionEvent.Completed(emptyList()),
+          )
+        )
+      )
+    val executor =
+      OpenAiAgentRuntimeExecutor(
+        providerSource = FixedProviderSource(provider),
+        gateway = gateway,
+        mcpToolRunner = null,
+      )
+    executor.resetSession(
+      AgentRuntimeConfig(
+        model = provider.toRemoteModel(),
+        taskId = "llm_chat",
+        initialTextMessages =
+          listOf(
+            AgentTextMessage(role = "user", content = "my name is Hai"),
+            AgentTextMessage(role = "assistant", content = "noted"),
+          ),
+      )
+    )
+
+    executor.executeStream(AgentExecutionContext(), AgentRequest(query = "what is my name?"))
+      .toList()
+
+    assertEquals(
+      listOf("user", "assistant", "user"),
+      gateway.requests.single().map { it.role },
+    )
+    assertEquals("my name is Hai", gateway.requests.single()[0].content)
+    assertEquals("what is my name?", gateway.requests.single()[2].content)
+  }
+
+  @Test
   fun `remote text response is exposed through existing AgentEvents`() = runBlocking {
     val gateway =
       ScriptedGateway(
