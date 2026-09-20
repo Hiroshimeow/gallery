@@ -518,8 +518,13 @@ fun HomeScreen(
         }
       },
       dismissButton = {
-        TextButton(onClick = { modelManagerViewModel.clearLoadModelAllowlistError() }) {
-          Text(stringResource(R.string.cancel))
+        TextButton(
+          onClick = {
+            modelManagerViewModel.clearLoadModelAllowlistError()
+            showSettingsDialog = true
+          }
+        ) {
+          Text("Open settings")
         }
       },
     )

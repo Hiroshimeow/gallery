@@ -1404,7 +1404,18 @@ constructor(
         }
 
         if (modelAllowlist == null) {
-          _uiState.update { it.copy(loadingModelAllowlistError = "Failed to load model list") }
+          val providers = openAiProviderRepository.readAll()
+          applyRemoteModels(providers, updateUiState = false)
+          val curTasks = getActiveCustomTasks().map { it.task }
+          _uiState.update {
+            createUiState()
+              .copy(
+                loadingModelAllowlist = false,
+                loadingModelAllowlistError = "Failed to load model list",
+                tasks = curTasks,
+                tasksByCategory = groupTasksByCategory(),
+              )
+          }
           return@launch
         }
 
