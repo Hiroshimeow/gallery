@@ -30,6 +30,7 @@ import com.google.ai.edge.gallery.apiserver.ApiServerSessionHold
 import com.google.ai.edge.gallery.apiserver.LocalApiForegroundService
 import com.google.ai.edge.gallery.apiserver.LocalApiServerPreferences
 import com.google.ai.edge.gallery.apiserver.ModelCatalogCache
+import com.google.ai.edge.gallery.common.JsonObjAndTextContent
 import com.google.ai.edge.gallery.common.ProjectConfig
 import com.google.ai.edge.gallery.common.SystemPromptHelper
 import com.google.ai.edge.gallery.common.getJsonResponse
@@ -1387,11 +1388,20 @@ constructor(
         }
 
         if (modelAllowlist == null) {
-          // Load from github.
-          var version = BuildConfig.VERSION_NAME.replace(".", "_")
-          val url = getAllowlistUrl(version)
-          Log.d(TAG, "Loading model allowlist from internet. Url: $url")
-          val data = getJsonResponse<ModelAllowlist>(url = url)
+          // Load from GitHub. A release can occasionally land before its matching allowlist file,
+          // so fall back to the immediately previous patch within the same major/minor line.
+          var data: JsonObjAndTextContent<ModelAllowlist>? = null
+          for (version in getAllowlistVersionCandidates(BuildConfig.VERSION_NAME)) {
+            val url = getAllowlistUrl(version)
+            Log.d(TAG, "Loading model allowlist from internet. Url: $url")
+            data = getJsonResponse<ModelAllowlist>(url = url)
+            if (data != null) {
+              if (version != BuildConfig.VERSION_NAME.replace(".", "_")) {
+                Log.w(TAG, "Using fallback model allowlist version: $version")
+              }
+              break
+            }
+          }
           modelAllowlist = data?.jsonObj
 
           if (modelAllowlist == null) {
@@ -1994,6 +2004,19 @@ constructor(
         )
 
     return downloadedFileExists || unzippedDirectoryExists
+  }
+}
+
+internal fun getAllowlistVersionCandidates(versionName: String): List<String> {
+  val normalized = versionName.replace(".", "_")
+  val match = Regex("""^(\d+)_(\d+)_(\d+)$""").matchEntire(normalized)
+    ?: return listOf(normalized)
+  val (major, minor, patchText) = match.destructured
+  val patch = patchText.toInt()
+  return if (patch > 0) {
+    listOf(normalized, "${major}_${minor}_${patch - 1}")
+  } else {
+    listOf(normalized)
   }
 }
 
