@@ -46,14 +46,10 @@ class OpenAiProtocolTest {
 
     assertEquals("hello", text.text)
     assertTrue(done.done)
-    assertEquals(
-      OpenAiToolCall(
-        id = "call_1",
-        name = "runMcpTool",
-        arguments = "{\"toolName\":\"shell\",\"input\":\"{ }\"}",
-      ),
-      accumulator.completedToolCalls().single(),
-    )
+    val toolCall = accumulator.completedToolCalls().single()
+    assertEquals("call_1", toolCall.id)
+    assertEquals("runMcpTool", toolCall.name)
+    assertEquals("{\"toolName\":\"shell\",\"input\":\"{ }\"}", toolCall.arguments)
   }
 
   @Test
