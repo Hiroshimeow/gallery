@@ -17,6 +17,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OpenAiAgentRuntimeExecutorTest {
+  @Test
+  fun `reset marks remote model ready and cleanup releases it`() = runBlocking {
+    val model = provider.toRemoteModel()
+    val executor =
+      OpenAiAgentRuntimeExecutor(
+        providerSource = FixedProviderSource(provider),
+        gateway = ScriptedGateway(emptyList()),
+        mcpToolRunner = null,
+      )
+
+    executor.resetSession(AgentRuntimeConfig(model = model, taskId = "llm_chat"))
+
+    assertTrue(model.instance != null)
+    executor.cleanUp()
+    assertTrue(model.instance == null)
+  }
+
   private val provider =
     OpenAiProvider(
       id = "remote",

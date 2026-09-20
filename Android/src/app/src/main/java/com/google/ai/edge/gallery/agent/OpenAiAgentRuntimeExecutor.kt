@@ -28,6 +28,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 private const val MAX_REMOTE_TOOL_LOOPS = 8
+private object RemoteModelInstance
 
 class OpenAiAgentRuntimeExecutor(
   private val providerSource: OpenAiProviderSource,
@@ -88,6 +89,7 @@ class OpenAiAgentRuntimeExecutor(
         messages = messages,
       )
     )
+    config.model.instance = RemoteModelInstance
   }
 
   override fun executeStream(
@@ -228,7 +230,7 @@ class OpenAiAgentRuntimeExecutor(
 
   override fun cleanUp(onDone: () -> Unit) {
     interrupt()
-    activeSession.set(null)
+    activeSession.getAndSet(null)?.config?.model?.instance = null
     onDone()
   }
 }

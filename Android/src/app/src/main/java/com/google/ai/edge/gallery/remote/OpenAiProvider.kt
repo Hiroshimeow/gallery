@@ -6,6 +6,7 @@
 package com.google.ai.edge.gallery.remote
 
 import com.google.ai.edge.gallery.data.BackendSpec
+import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.LlmProfile
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelMetadata
@@ -19,6 +20,13 @@ enum class OpenAiProviderType {
   OPENAI,
   OPENAI_COMPATIBLE,
 }
+
+fun remoteModelsForTask(taskId: String, providers: List<OpenAiProvider>): List<Model> =
+  if (taskId == BuiltInTaskId.LLM_CHAT || taskId == BuiltInTaskId.LLM_AGENT_CHAT) {
+    providers.map { it.toRemoteModel() }
+  } else {
+    emptyList()
+  }
 
 @Serializable
 data class OpenAiProvider(
