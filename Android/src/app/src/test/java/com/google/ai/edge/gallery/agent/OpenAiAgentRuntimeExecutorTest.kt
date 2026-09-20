@@ -1,6 +1,5 @@
 package com.google.ai.edge.gallery.agent
 
-import android.test.mock.MockContext
 import com.google.ai.edge.gallery.remote.OpenAiChatGateway
 import com.google.ai.edge.gallery.remote.OpenAiCompletionEvent
 import com.google.ai.edge.gallery.remote.OpenAiMessage
@@ -9,7 +8,6 @@ import com.google.ai.edge.gallery.remote.OpenAiProviderSource
 import com.google.ai.edge.gallery.remote.OpenAiProviderType
 import com.google.ai.edge.gallery.remote.OpenAiToolCall
 import com.google.ai.edge.gallery.remote.RemoteMcpToolRunner
-import com.google.ai.edge.gallery.remote.toRemoteModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
@@ -46,10 +44,8 @@ class OpenAiAgentRuntimeExecutorTest {
         gateway = gateway,
         mcpToolRunner = null,
       )
-    executor.initialize(
-      context = MockContext(),
-      config = AgentRuntimeConfig(model = provider.toRemoteModel(), taskId = "llm_chat"),
-      onDone = { error -> assertTrue(error.isEmpty()) },
+    executor.resetSession(
+      AgentRuntimeConfig(model = provider.toRemoteModel(), taskId = "llm_chat")
     )
 
     val events =
@@ -91,10 +87,8 @@ class OpenAiAgentRuntimeExecutorTest {
         gateway = gateway,
         mcpToolRunner = runner,
       )
-    executor.initialize(
-      context = MockContext(),
-      config = AgentRuntimeConfig(model = provider.toRemoteModel(), taskId = "agent_chat"),
-      onDone = {},
+    executor.resetSession(
+      AgentRuntimeConfig(model = provider.toRemoteModel(), taskId = "agent_chat")
     )
 
     val events =

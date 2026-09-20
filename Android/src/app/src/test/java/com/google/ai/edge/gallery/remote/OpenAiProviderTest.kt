@@ -1,6 +1,7 @@
 package com.google.ai.edge.gallery.remote
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.RuntimeType
 import java.io.File
 import kotlinx.coroutines.runBlocking
@@ -83,6 +84,22 @@ class OpenAiProviderTest {
     } finally {
       file.delete()
     }
+  }
+
+  @Test
+  fun `remote models are offered only to ai chat and agent chat`() {
+    val provider =
+      OpenAiProvider(
+        id = "remote",
+        name = "Remote",
+        type = OpenAiProviderType.OPENAI_COMPATIBLE,
+        baseUrl = "http://host:8000/v1",
+        model = "qwen",
+      )
+
+    assertEquals(1, remoteModelsForTask(BuiltInTaskId.LLM_CHAT, listOf(provider)).size)
+    assertEquals(1, remoteModelsForTask(BuiltInTaskId.LLM_AGENT_CHAT, listOf(provider)).size)
+    assertTrue(remoteModelsForTask(BuiltInTaskId.LLM_ASK_IMAGE, listOf(provider)).isEmpty())
   }
 
   @Test
