@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: ["pr-1217-local-api"]
+    branches: ["feature/openai-providers-mcp"]
     paths:
       - "Android/**"
       - ".github/workflows/build_android.yaml"
@@ -34,6 +34,9 @@ jobs:
       - name: Install Android SDK Platform 37
         run: echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-37.0"
 
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
       - name: Build release APK
         run: ./gradlew :app:assembleRelease
 
@@ -46,7 +49,7 @@ jobs:
           src="Android/src/app/build/outputs/apk/release/app-release.apk"
           test -f "$src"
           short_sha="${GITHUB_SHA::8}"
-          apk="gallery-pr1217-v1.0.20-${short_sha}.apk"
+          apk="gallery-openai-providers-mcp-v1.0.20-${short_sha}.apk"
           cp "$src" "$apk"
           sha256sum "$apk" | tee "$apk.sha256"
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
@@ -54,7 +57,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gallery-pr1217-apk
+          name: gallery-openai-providers-mcp-apk
           path: |
             ${{ steps.package.outputs.apk }}
             ${{ steps.package.outputs.apk }}.sha256
@@ -66,6 +69,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="pr1217-latest"
+          tag="openai-providers-mcp-latest"
           gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          gh release create "$tag"             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "PR #1217 Local API Server - Test APK"             --notes "Built from google-ai-edge/gallery PR #1217 Android source. Fork branch: pr-1217-local-api. Android source matches upstream PR head f3c682d6987c34fe56409c58d00fb56756cc0180; the only fork-only change is this CI packaging workflow."             --prerelease             "${{ steps.package.outputs.apk }}"             "${{ steps.package.outputs.apk }}.sha256"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Gallery OpenAI Providers + MCP - Test APK" \
+            --notes "Experimental build based on google-ai-edge/gallery PR #1217, adding OpenAI/OpenAI-compatible remote providers while preserving local LiteRT inference and MCP Agent Chat." \
+            --prerelease \
+            "${{ steps.package.outputs.apk }}" \
+            "${{ steps.package.outputs.apk }}.sha256"
