@@ -24,5 +24,7 @@ import com.google.gson.annotations.SerializedName
  * Encapsulates model-specific operational parameters specified in the allowlist JSON.
  */
 data class ModelMetadata(
-  val placeholder: String = ""
+  val placeholder: String = "",
+  val remoteProviderId: String = "",
+  val remoteModelId: String = "",
 )

@@ -173,6 +173,10 @@ data class Model(
   val isLiteRtLm: Boolean
     get() = backendSpec.isLiteRtLm
 
+  /** Indicates whether this model is served by a remote OpenAI-compatible endpoint. */
+  val isRemoteOpenAi: Boolean
+    get() = backendSpec.isOpenAiRemote
+
   /**
    * Indicates whether the model is allowed to use [capability] for the task identified by [taskId].
    */

@@ -1,6 +1,9 @@
 package com.google.ai.edge.gallery.remote
 
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.google.ai.edge.gallery.data.RuntimeType
+import java.io.File
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -53,6 +56,33 @@ class OpenAiProviderTest {
 
     assertFalse(invalidUrl.validationError().isNullOrEmpty())
     assertFalse(missingModel.validationError().isNullOrEmpty())
+  }
+
+  @Test
+  fun `repository saves updates and deletes providers`() = runBlocking {
+    val file = File.createTempFile("openai_provider_test", ".preferences_pb").also { it.delete() }
+    try {
+      val repository = OpenAiProviderRepository(PreferenceDataStoreFactory.create { file })
+      val first =
+        OpenAiProvider(
+          id = "a5000",
+          name = "A5000",
+          type = OpenAiProviderType.OPENAI_COMPATIBLE,
+          baseUrl = "http://host:8000/v1",
+          model = "qwen",
+        )
+      repository.save(first)
+      assertEquals(listOf(first), repository.readAll())
+
+      val updated = first.copy(model = "qwen-32b")
+      repository.save(updated)
+      assertEquals(listOf(updated), repository.readAll())
+
+      repository.delete(first.id)
+      assertTrue(repository.readAll().isEmpty())
+    } finally {
+      file.delete()
+    }
   }
 
   @Test

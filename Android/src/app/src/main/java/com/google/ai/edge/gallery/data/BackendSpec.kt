@@ -45,6 +45,10 @@ data class BackendSpec(
   val isLiteRtLm: Boolean
     get() = runtimeType == RuntimeType.LITERT_LM
 
+  /** Indicates whether the model is served by a remote OpenAI-compatible endpoint. */
+  val isOpenAiRemote: Boolean
+    get() = runtimeType == RuntimeType.OPENAI_REMOTE
+
   /**
    * The default accelerator for this model.
    *
