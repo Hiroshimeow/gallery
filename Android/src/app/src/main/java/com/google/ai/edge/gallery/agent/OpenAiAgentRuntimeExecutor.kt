@@ -6,15 +6,19 @@
 package com.google.ai.edge.gallery.agent
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.util.Base64
 import com.google.ai.edge.gallery.agent.sessions.LlmSessionManager
 import com.google.ai.edge.gallery.agent.sessions.generateSessionId
 import com.google.ai.edge.gallery.remote.OPENAI_JSON
 import com.google.ai.edge.gallery.remote.OpenAiChatGateway
 import com.google.ai.edge.gallery.remote.OpenAiCompletionEvent
+import com.google.ai.edge.gallery.remote.createOpenAiUserMessage
 import com.google.ai.edge.gallery.remote.OpenAiMessage
 import com.google.ai.edge.gallery.remote.OpenAiProviderSource
 import com.google.ai.edge.gallery.remote.OpenAiRequestToolCall
 import com.google.ai.edge.gallery.remote.RemoteMcpToolRunner
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -56,7 +60,7 @@ class OpenAiAgentRuntimeExecutor(
         ActiveModelInfo(
           model = config.model,
           taskId = config.taskId,
-          supportImage = false,
+          supportImage = true,
         )
       }
 
@@ -118,9 +122,8 @@ class OpenAiAgentRuntimeExecutor(
     activeJob.set(job)
 
     try {
-      historyMutex.withLock {
-        session.messages += OpenAiMessage(role = "user", content = request.query)
-      }
+      val userMessage = request.toOpenAiUserMessage()
+      historyMutex.withLock { session.messages += userMessage }
 
       repeat(MAX_REMOTE_TOOL_LOOPS) {
         val messages = historyMutex.withLock { session.messages.toList() }
@@ -130,6 +133,7 @@ class OpenAiAgentRuntimeExecutor(
         gateway
           .streamCompletion(
             provider = provider,
+            modelId = session.config.model.metadata.remoteModelId,
             messages = messages,
             enableMcpTool = mcpToolRunner != null,
           )
@@ -192,6 +196,33 @@ class OpenAiAgentRuntimeExecutor(
     } finally {
       activeJob.compareAndSet(job, null)
     }
+  }
+
+  private fun AgentRequest.toOpenAiUserMessage(): OpenAiMessage {
+    val images = mutableListOf<String>()
+    val audio = mutableListOf<String>()
+    attachments.forEach { attachment ->
+      when (attachment) {
+        is Attachment.ImageBitmap -> {
+          val bytes = ByteArrayOutputStream().use { stream ->
+            attachment.bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+            stream.toByteArray()
+          }
+          images += "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+        }
+        is Attachment.AudioBytes -> {
+          audio += Base64.encodeToString(attachment.audioBytes, Base64.NO_WRAP)
+        }
+        is Attachment.ImageUri -> error("Remote OpenAI ImageUri attachment is not supported")
+        is Attachment.AudioUri -> error("Remote OpenAI AudioUri attachment is not supported")
+        is Attachment.File -> error("Remote OpenAI file attachment is not supported")
+      }
+    }
+    return createOpenAiUserMessage(
+      text = query,
+      imageDataUrls = images,
+      audioBase64Wav = audio,
+    )
   }
 
   private suspend fun runMcpToolCall(arguments: String): String {

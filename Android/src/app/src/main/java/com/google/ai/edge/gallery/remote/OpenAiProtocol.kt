@@ -9,13 +9,16 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 val OPENAI_JSON =
   Json {
@@ -30,15 +33,84 @@ data class OpenAiChatRequest(
   val messages: List<OpenAiMessage>,
   val stream: Boolean,
   val tools: List<OpenAiToolSpec>? = null,
+  @SerialName("max_tokens") val maxTokens: Int? = null,
 )
 
 @Serializable
 data class OpenAiMessage(
   val role: String,
-  val content: String? = null,
+  @SerialName("content") val contentJson: JsonElement? = null,
   @SerialName("tool_call_id") val toolCallId: String? = null,
   @SerialName("tool_calls") val toolCalls: List<OpenAiRequestToolCall>? = null,
-)
+) {
+  constructor(
+    role: String,
+    content: String?,
+    toolCallId: String? = null,
+    toolCalls: List<OpenAiRequestToolCall>? = null,
+  ) : this(
+    role = role,
+    contentJson = content?.let(::JsonPrimitive),
+    toolCallId = toolCallId,
+    toolCalls = toolCalls,
+  )
+
+  val content: String?
+    get() = (contentJson as? JsonPrimitive)?.contentOrNull
+}
+
+fun createOpenAiUserMessage(
+  text: String,
+  imageDataUrls: List<String> = emptyList(),
+  audioBase64Wav: List<String> = emptyList(),
+): OpenAiMessage {
+  if (imageDataUrls.isEmpty() && audioBase64Wav.isEmpty()) {
+    return OpenAiMessage(role = "user", content = text)
+  }
+
+  val parts = mutableListOf<JsonElement>()
+  if (text.isNotEmpty()) {
+    parts += buildJsonObject {
+      put("type", "text")
+      put("text", text)
+    }
+  }
+  imageDataUrls.forEach { dataUrl ->
+    parts += buildJsonObject {
+      put("type", "image_url")
+      put(
+        "image_url",
+        buildJsonObject {
+          put("url", dataUrl)
+          put("detail", "auto")
+        },
+      )
+    }
+  }
+  audioBase64Wav.forEach { base64 ->
+    parts += buildJsonObject {
+      put("type", "input_audio")
+      put(
+        "input_audio",
+        buildJsonObject {
+          put("data", base64)
+          put("format", "wav")
+        },
+      )
+    }
+  }
+  return OpenAiMessage(role = "user", contentJson = JsonArray(parts))
+}
+
+fun parseOpenAiModelsResponse(body: String): List<String> {
+  val root = OPENAI_JSON.parseToJsonElement(body).jsonObject
+  return root["data"]
+    ?.jsonArray
+    ?.mapNotNull { item -> item.jsonObject["id"]?.jsonPrimitive?.contentOrNull?.trim() }
+    ?.filter { it.isNotEmpty() }
+    ?.distinct()
+    .orEmpty()
+}
 
 @Serializable
 data class OpenAiToolSpec(

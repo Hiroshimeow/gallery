@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -38,8 +39,11 @@ fun RemoteProviderSettings(modelManagerViewModel: ModelManagerViewModel) {
   var name by remember { mutableStateOf("") }
   var baseUrl by remember { mutableStateOf("") }
   var apiKey by remember { mutableStateOf("") }
-  var model by remember { mutableStateOf("") }
+  var modelIds by remember { mutableStateOf<List<String>>(emptyList()) }
+  var manualModel by remember { mutableStateOf("") }
+  var maxOutputTokens by remember { mutableStateOf("0") }
   var error by remember { mutableStateOf("") }
+  var loadingModels by remember { mutableStateOf(false) }
 
   fun startNew(type: OpenAiProviderType) {
     editingId = null
@@ -47,7 +51,9 @@ fun RemoteProviderSettings(modelManagerViewModel: ModelManagerViewModel) {
     name = if (type == OpenAiProviderType.OPENAI) "OpenAI" else "Remote"
     baseUrl = if (type == OpenAiProviderType.OPENAI) OPENAI_DEFAULT_BASE_URL else ""
     apiKey = ""
-    model = ""
+    modelIds = emptyList()
+    manualModel = ""
+    maxOutputTokens = "0"
     error = ""
   }
 
@@ -57,7 +63,9 @@ fun RemoteProviderSettings(modelManagerViewModel: ModelManagerViewModel) {
     name = provider.name
     baseUrl = provider.effectiveBaseUrl
     apiKey = provider.apiKey
-    model = provider.model
+    modelIds = provider.effectiveModelIds
+    manualModel = ""
+    maxOutputTokens = provider.maxOutputTokens.toString()
     error = ""
   }
 
@@ -65,6 +73,31 @@ fun RemoteProviderSettings(modelManagerViewModel: ModelManagerViewModel) {
     editingId = null
     editingType = null
     error = ""
+    loadingModels = false
+  }
+
+  fun buildProvider(type: OpenAiProviderType): OpenAiProvider? {
+    val tokenLimit = maxOutputTokens.toIntOrNull()
+    if (tokenLimit == null || tokenLimit < 0) {
+      error = "Max output tokens must be 0 or greater"
+      return null
+    }
+    val provider =
+      OpenAiProvider(
+        id = editingId ?: UUID.randomUUID().toString(),
+        name = name.trim(),
+        type = type,
+        baseUrl = if (type == OpenAiProviderType.OPENAI) "" else baseUrl.trim(),
+        apiKey = apiKey.trim(),
+        model = "",
+        models = modelIds,
+        maxOutputTokens = tokenLimit,
+      )
+    provider.validationError()?.let {
+      error = it
+      return null
+    }
+    return provider
   }
 
   Column(
@@ -76,27 +109,46 @@ fun RemoteProviderSettings(modelManagerViewModel: ModelManagerViewModel) {
       style = MaterialTheme.typography.titleSmall,
     )
     Text(
-      "Use the same Gallery chat UI with OpenAI or any OpenAI-compatible /v1 endpoint.",
+      "One endpoint can expose many models. Gallery loads /v1/models and every discovered model becomes selectable directly inside chat.",
       style = MaterialTheme.typography.bodySmall,
       color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 
     providers.forEach { provider ->
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-          Text(provider.name, style = MaterialTheme.typography.bodyMedium)
+      Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(provider.name, style = MaterialTheme.typography.bodyMedium)
+            Text(
+              "${provider.effectiveModelIds.size} models · ${provider.effectiveBaseUrl}",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+          TextButton(
+            onClick = {
+              error = ""
+              modelManagerViewModel.refreshRemoteProviderModels(provider) { result ->
+                result.exceptionOrNull()?.let { error = it.message ?: "Failed to load models" }
+              }
+            }
+          ) {
+            Text("Refresh")
+          }
+          TextButton(onClick = { startEdit(provider) }) { Text("Edit") }
+          TextButton(onClick = { modelManagerViewModel.deleteRemoteProvider(provider.id) }) {
+            Text("Delete")
+          }
+        }
+        if (provider.effectiveModelIds.isNotEmpty()) {
           Text(
-            provider.model + " · " + provider.effectiveBaseUrl,
+            provider.effectiveModelIds.joinToString(", "),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
-        }
-        TextButton(onClick = { startEdit(provider) }) { Text("Edit") }
-        TextButton(onClick = { modelManagerViewModel.deleteRemoteProvider(provider.id) }) {
-          Text("Delete")
         }
       }
     }
@@ -144,13 +196,46 @@ fun RemoteProviderSettings(modelManagerViewModel: ModelManagerViewModel) {
         visualTransformation = PasswordVisualTransformation(),
       )
       OutlinedTextField(
-        value = model,
-        onValueChange = { model = it },
-        label = { Text("Model") },
-        placeholder = { Text("gpt-5.6 / qwen3 / ...") },
+        value = maxOutputTokens,
+        onValueChange = { maxOutputTokens = it.filter(Char::isDigit) },
+        label = { Text("Max output tokens") },
+        supportingText = {
+          Text("0 = endpoint/model default. Remote chat is not limited by Gallery's 1024-token benchmark sliders.")
+        },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
       )
+
+      Text(
+        if (modelIds.isEmpty()) "No models loaded yet" else "Models (${modelIds.size})",
+        style = MaterialTheme.typography.labelLarge,
+      )
+      modelIds.forEach { id ->
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+          Text(id, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+          TextButton(onClick = { modelIds = modelIds.filterNot { it == id } }) { Text("Remove") }
+        }
+      }
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+          value = manualModel,
+          onValueChange = { manualModel = it },
+          label = { Text("Manual model ID") },
+          modifier = Modifier.weight(1f),
+          singleLine = true,
+        )
+        OutlinedButton(
+          onClick = {
+            val id = manualModel.trim()
+            if (id.isNotEmpty()) {
+              modelIds = (modelIds + id).distinct()
+              manualModel = ""
+            }
+          }
+        ) {
+          Text("Add")
+        }
+      }
 
       if (error.isNotEmpty()) {
         Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -158,23 +243,35 @@ fun RemoteProviderSettings(modelManagerViewModel: ModelManagerViewModel) {
 
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(
+          enabled = !loadingModels,
           onClick = {
-            val provider =
-              OpenAiProvider(
-                id = editingId ?: UUID.randomUUID().toString(),
-                name = name.trim(),
-                type = type,
-                baseUrl = if (type == OpenAiProviderType.OPENAI) "" else baseUrl.trim(),
-                apiKey = apiKey.trim(),
-                model = model.trim(),
-              )
-            val validationError = provider.validationError()
-            if (validationError != null) {
-              error = validationError
-            } else {
-              modelManagerViewModel.saveRemoteProvider(provider) { error = it }
-              closeEditor()
+            val provider = buildProvider(type) ?: return@OutlinedButton
+            loadingModels = true
+            error = ""
+            modelManagerViewModel.refreshRemoteProviderModels(provider) { result ->
+              loadingModels = false
+              result
+                .onSuccess { updated ->
+                  modelIds = updated.effectiveModelIds
+                  closeEditor()
+                }
+                .onFailure { throwable ->
+                  error =
+                    "Endpoint saved, but /v1/models failed: " +
+                      (throwable.message ?: "unknown error") +
+                      ". Add model IDs manually and Save."
+                }
             }
+          }
+        ) {
+          Text(if (loadingModels) "Loading…" else "Save & load models")
+        }
+        OutlinedButton(
+          enabled = !loadingModels,
+          onClick = {
+            val provider = buildProvider(type) ?: return@OutlinedButton
+            modelManagerViewModel.saveRemoteProvider(provider) { error = it }
+            closeEditor()
           }
         ) {
           Text("Save")

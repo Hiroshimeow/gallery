@@ -14,19 +14,13 @@ import com.google.ai.edge.gallery.data.RuntimeType
 import kotlinx.serialization.Serializable
 
 const val OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+private const val REMOTE_UI_CONTEXT_LIMIT = 1_048_576
 
 @Serializable
 enum class OpenAiProviderType {
   OPENAI,
   OPENAI_COMPATIBLE,
 }
-
-fun remoteModelsForTask(taskId: String, providers: List<OpenAiProvider>): List<Model> =
-  if (taskId == BuiltInTaskId.LLM_CHAT || taskId == BuiltInTaskId.LLM_AGENT_CHAT) {
-    providers.map { it.toRemoteModel() }
-  } else {
-    emptyList()
-  }
 
 @Serializable
 data class OpenAiProvider(
@@ -35,7 +29,11 @@ data class OpenAiProvider(
   val type: OpenAiProviderType,
   val baseUrl: String = "",
   val apiKey: String = "",
-  val model: String,
+  // Legacy single-model field retained so existing saved provider profiles migrate cleanly.
+  val model: String = "",
+  val models: List<String> = emptyList(),
+  // 0 means do not send max_tokens; the endpoint/model decides.
+  val maxOutputTokens: Int = 0,
 ) {
   val effectiveBaseUrl: String
     get() =
@@ -44,36 +42,55 @@ data class OpenAiProvider(
         OpenAiProviderType.OPENAI_COMPATIBLE -> baseUrl.trim().trimEnd('/')
       }
 
+  val effectiveModelIds: List<String>
+    get() =
+      (models + listOf(model))
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+
   fun validationError(): String? {
     if (id.isBlank()) return "Provider id is required"
     if (name.isBlank()) return "Provider name is required"
-    if (model.isBlank()) return "Model is required"
     if (type == OpenAiProviderType.OPENAI && apiKey.isBlank()) return "OpenAI API key is required"
     val url = effectiveBaseUrl
     if (!(url.startsWith("http://") || url.startsWith("https://"))) {
       return "Base URL must start with http:// or https://"
     }
+    if (maxOutputTokens < 0) return "Max output tokens must be 0 or greater"
     return null
   }
 
-  fun toRemoteModel(): Model {
+  fun toRemoteModels(): List<Model> = effectiveModelIds.map { toRemoteModel(it) }
+
+  fun toRemoteModel(modelId: String = effectiveModelIds.firstOrNull().orEmpty()): Model {
+    require(modelId.isNotBlank()) { "Remote model id is required" }
     val safeName =
       buildString {
           append("remote_")
           append(id)
           append("_")
-          append(model)
+          append(modelId)
         }
         .replace(Regex("[^A-Za-z0-9._-]"), "_")
     val providerLabel =
       if (type == OpenAiProviderType.OPENAI) "OpenAI" else "OpenAI-compatible"
     return Model(
       name = safeName,
-      displayName = "$name · $model",
-      info = "Remote $providerLabel provider",
+      displayName = "$name · $modelId",
+      info = "Remote $providerLabel provider · endpoint-managed context",
       backendSpec = BackendSpec(runtimeType = RuntimeType.OPENAI_REMOTE),
-      llmProfile = LlmProfile(),
-      metadata = ModelMetadata(remoteProviderId = id, remoteModelId = model),
+      llmProfile = LlmProfile(maxTokens = REMOTE_UI_CONTEXT_LIMIT),
+      supportImage = true,
+      supportAudio = true,
+      metadata = ModelMetadata(remoteProviderId = id, remoteModelId = modelId),
     )
   }
 }
+
+fun remoteModelsForTask(taskId: String, providers: List<OpenAiProvider>): List<Model> =
+  if (taskId == BuiltInTaskId.LLM_CHAT || taskId == BuiltInTaskId.LLM_AGENT_CHAT) {
+    providers.flatMap { it.toRemoteModels() }
+  } else {
+    emptyList()
+  }

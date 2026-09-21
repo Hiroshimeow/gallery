@@ -76,6 +76,7 @@ import com.google.ai.edge.gallery.proto.AccessTokenData
 import com.google.ai.edge.gallery.proto.HfModelItemProto
 import com.google.ai.edge.gallery.proto.ImportedModel
 import com.google.ai.edge.gallery.proto.Theme
+import com.google.ai.edge.gallery.remote.KtorOpenAiChatGateway
 import com.google.ai.edge.gallery.remote.OpenAiProvider
 import com.google.ai.edge.gallery.remote.OpenAiProviderRepository
 import com.google.ai.edge.gallery.remote.remoteModelsForTask
@@ -222,6 +223,7 @@ constructor(
   private val modelCatalogCache: ModelCatalogCache,
   private val apiServerSessionHold: ApiServerSessionHold,
   private val openAiProviderRepository: OpenAiProviderRepository,
+  private val openAiGateway: KtorOpenAiChatGateway,
   @ApplicationContext private val context: Context,
 ) :
   ViewModel()
@@ -232,6 +234,7 @@ constructor(
   open val uiState = _uiState.asStateFlow()
   private val _remoteProviders = MutableStateFlow<List<OpenAiProvider>>(emptyList())
   val remoteProviders = _remoteProviders.asStateFlow()
+  private val autoRefreshedRemoteProviderIds = ConcurrentHashMap.newKeySet<String>()
 
   init {
     viewModelScope.launch { uiState.collect { modelCatalogCache.update(getAllDownloadedModels()) } }
@@ -241,6 +244,24 @@ constructor(
         if (!_uiState.value.loadingModelAllowlist && _uiState.value.tasks.isNotEmpty()) {
           applyRemoteModels(providers, updateUiState = true)
         }
+        providers.forEach { provider ->
+          if (autoRefreshedRemoteProviderIds.add(provider.id)) {
+            viewModelScope.launch(Dispatchers.IO) {
+              runCatching { openAiGateway.listModels(provider) }
+                .onSuccess { discovered ->
+                  if (discovered.isNotEmpty()) {
+                    val merged = (provider.effectiveModelIds + discovered).distinct()
+                    if (merged != provider.effectiveModelIds) {
+                      openAiProviderRepository.save(provider.copy(model = "", models = merged))
+                    }
+                  }
+                }
+                .onFailure { error ->
+                  Log.w(TAG, "Remote model catalog refresh failed for ${provider.name}", error)
+                }
+            }
+          }
+        }
       }
     }
   }
@@ -249,6 +270,31 @@ constructor(
     viewModelScope.launch {
       runCatching { openAiProviderRepository.save(provider) }
         .onFailure { onError(it.message ?: "Failed to save provider") }
+    }
+  }
+
+  fun refreshRemoteProviderModels(
+    provider: OpenAiProvider,
+    onResult: (Result<OpenAiProvider>) -> Unit = {},
+  ) {
+    viewModelScope.launch(Dispatchers.IO) {
+      val result =
+        runCatching {
+          provider.validationError()?.let { throw IllegalArgumentException(it) }
+          // Save endpoint credentials/config first so users can add models manually even if
+          // /v1/models is unavailable on a compatible server.
+          openAiProviderRepository.save(provider)
+          val discovered = openAiGateway.listModels(provider)
+          require(discovered.isNotEmpty()) { "Endpoint returned an empty model list" }
+          val updated =
+            provider.copy(
+              model = "",
+              models = (provider.effectiveModelIds + discovered).distinct(),
+            )
+          openAiProviderRepository.save(updated)
+          updated
+        }
+      withContext(Dispatchers.Main) { onResult(result) }
     }
   }
 

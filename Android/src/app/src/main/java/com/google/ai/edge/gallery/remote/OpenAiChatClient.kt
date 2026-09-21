@@ -7,6 +7,7 @@ package com.google.ai.edge.gallery.remote
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.android.Android
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -30,27 +31,52 @@ sealed interface OpenAiCompletionEvent {
 interface OpenAiChatGateway {
   fun streamCompletion(
     provider: OpenAiProvider,
+    modelId: String,
     messages: List<OpenAiMessage>,
     enableMcpTool: Boolean,
   ): Flow<OpenAiCompletionEvent>
 }
 
+interface OpenAiModelCatalogGateway {
+  suspend fun listModels(provider: OpenAiProvider): List<String>
+}
+
 @Singleton
-class KtorOpenAiChatGateway @Inject constructor() : OpenAiChatGateway {
+class KtorOpenAiChatGateway @Inject constructor() : OpenAiChatGateway, OpenAiModelCatalogGateway {
   private val client = HttpClient(Android)
+
+  override suspend fun listModels(provider: OpenAiProvider): List<String> {
+    provider.validationError()?.let { error -> throw IllegalArgumentException(error) }
+    val response =
+      client.get(provider.effectiveBaseUrl + "/models") {
+        if (provider.apiKey.isNotBlank()) {
+          header(HttpHeaders.Authorization, "Bearer " + provider.apiKey)
+        }
+      }
+    if (!response.status.isSuccess()) {
+      val body = response.bodyAsText().take(2048)
+      throw IllegalStateException(
+        "Model list returned HTTP " + response.status.value + ": " + body
+      )
+    }
+    return parseOpenAiModelsResponse(response.bodyAsText())
+  }
 
   override fun streamCompletion(
     provider: OpenAiProvider,
+    modelId: String,
     messages: List<OpenAiMessage>,
     enableMcpTool: Boolean,
   ): Flow<OpenAiCompletionEvent> = flow {
     provider.validationError()?.let { error -> throw IllegalArgumentException(error) }
+    require(modelId.isNotBlank()) { "Remote model id is required" }
     val request =
       OpenAiChatRequest(
-        model = provider.model,
+        model = modelId,
         messages = messages,
         stream = true,
         tools = if (enableMcpTool) listOf(RUN_MCP_TOOL_SPEC) else null,
+        maxTokens = provider.maxOutputTokens.takeIf { it > 0 },
       )
     val response =
       client.post(provider.effectiveBaseUrl + "/chat/completions") {

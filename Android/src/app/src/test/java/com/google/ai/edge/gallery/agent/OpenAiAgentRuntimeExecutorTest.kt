@@ -183,6 +183,7 @@ class OpenAiAgentRuntimeExecutorTest {
 
     override fun streamCompletion(
       provider: OpenAiProvider,
+      modelId: String,
       messages: List<OpenAiMessage>,
       enableMcpTool: Boolean,
     ): Flow<OpenAiCompletionEvent> = flow {

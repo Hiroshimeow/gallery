@@ -68,7 +68,9 @@ import androidx.navigation.navArgument
 import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskData
 import com.google.ai.edge.gallery.customtasks.common.CustomTaskDataForBuiltinTask
+import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.data.isRemoteOpenAi
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.isLegacyTasks
@@ -153,7 +155,39 @@ fun GalleryNavHost(
   var pickedTask by remember { mutableStateOf<Task?>(null) }
   var enableHomeScreenAnimation by remember { mutableStateOf(true) }
   var enableModelListAnimation by remember { mutableStateOf(true) }
+  var didAutoOpenChat by remember { mutableStateOf(false) }
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
+
+  // Normal app launch goes directly to chat once a usable model exists. Prefer Agent Chat so
+  // MCP is available, and prefer remote providers when configured. Back still returns Home.
+  LaunchedEffect(modelManagerUiState.tasks, modelManagerUiState.modelDownloadStatus) {
+    if (
+      !didAutoOpenChat &&
+        tosViewModel.getIsTosAccepted() &&
+        navController.currentDestination?.route == ROUTE_HOMESCREEN
+    ) {
+      val preferredTasks =
+        listOf(BuiltInTaskId.LLM_AGENT_CHAT, BuiltInTaskId.LLM_CHAT).mapNotNull { taskId ->
+          modelManagerUiState.tasks.firstOrNull { it.id == taskId }
+        }
+      val target =
+        preferredTasks.firstNotNullOfOrNull { task ->
+          val readyModels =
+            task.models.filter { model ->
+              modelManagerUiState.modelDownloadStatus[model.name]?.status ==
+                ModelDownloadStatusType.SUCCEEDED
+            }
+          val model = readyModels.firstOrNull { it.isRemoteOpenAi } ?: readyModels.firstOrNull()
+          model?.let { task to it }
+        }
+      if (target != null) {
+        val (task, model) = target
+        didAutoOpenChat = true
+        modelManagerViewModel.selectModel(model)
+        navController.navigate("$ROUTE_MODEL/${task.id}/${model.name}") { launchSingleTop = true }
+      }
+    }
+  }
 
   // Track whether app is in foreground.
   DisposableEffect(lifecycleOwner) {

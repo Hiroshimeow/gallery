@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.agent.AgentTextMessage
 import com.google.ai.edge.gallery.agent.PromptExpander
 import com.google.ai.edge.gallery.common.LOCAL_URL_BASE
 import com.google.ai.edge.gallery.data.AgentSkillsURLs
@@ -299,6 +300,7 @@ fun AgentChatScreen(
     },
     onSkillClicked = { showSkillManagerBottomSheet = true },
     onMcpClicked = { showMcpManagerBottomSheet = true },
+    showMcpPicker = true,
     showImagePicker = true,
     showAudioPicker = true,
     getActiveSkills = {
@@ -762,6 +764,14 @@ private fun resetSessionWithCurrentSkillsAndMcps(
 ) {
   val model = modelManagerViewModel.uiState.value.selectedModel
   val litertMessages = initialMessages.mapNotNull { convertToLitertMessage(it) }
+  val textMessages =
+    initialMessages.filterIsInstance<ChatMessageText>().mapNotNull { message ->
+      when (message.side) {
+        ChatSide.USER -> AgentTextMessage(role = "user", content = message.content)
+        ChatSide.AGENT -> AgentTextMessage(role = "assistant", content = message.content)
+        ChatSide.SYSTEM -> null
+      }
+    }
   val toolsPrompt = agentTools.mcpManagerViewModel.getToolsPrompt()
   val actualSystemPrompt = getEffectiveBaseSystemPrompt(curSystemPrompt, toolsPrompt.isNotEmpty())
 
@@ -788,6 +798,7 @@ private fun resetSessionWithCurrentSkillsAndMcps(
     onDone = { onDone(model) },
     enableConversationConstrainedDecoding = true,
     initialMessages = litertMessages,
+    initialTextMessages = textMessages,
     clearHistory = clearHistory,
   )
 }
