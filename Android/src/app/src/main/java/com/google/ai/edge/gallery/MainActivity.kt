@@ -50,12 +50,14 @@ import androidx.core.net.toUri
 import androidx.core.os.bundleOf
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
+import com.google.ai.edge.gallery.customtasks.agentchat.McpOAuthCoordinator
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import com.google.ai.edge.gallery.ui.theme.GalleryTheme
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.firebase.analytics.FirebaseAnalytics
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -63,6 +65,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
   private val modelManagerViewModel: ModelManagerViewModel by viewModels()
+  @Inject lateinit var mcpOAuthCoordinator: McpOAuthCoordinator
   private var splashScreenAboutToExit: Boolean = false
   private var contentSet: Boolean = false
 
@@ -71,6 +74,7 @@ class MainActivity : ComponentActivity() {
     // This prevents Jetpack Compose from automatically restoring the previous screen
     // and forces the app to start cleanly on the Home Screen after an OS kill.
     super.onCreate(null)
+    handleMcpOAuthIntent(intent)
 
     // Debug: Dump all intent extras to see what FCM unloads
     intent.extras?.let { extras ->
@@ -185,6 +189,7 @@ class MainActivity : ComponentActivity() {
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     setIntent(intent)
+    handleMcpOAuthIntent(intent)
 
     // Debug: Dump all intent extras to see what FCM unloads
     intent.extras?.let { extras ->
@@ -200,6 +205,17 @@ class MainActivity : ComponentActivity() {
         startActivity(browserIntent)
       } else {
         intent.data = link.toUri()
+      }
+    }
+  }
+
+  private fun handleMcpOAuthIntent(incomingIntent: Intent) {
+    val data = incomingIntent.data
+    if (!mcpOAuthCoordinator.isOAuthCallback(data)) return
+    incomingIntent.data = null
+    lifecycleScope.launch {
+      mcpOAuthCoordinator.completeAuthorizationCallback(data!!).onFailure { error ->
+        Log.e(TAG, "MCP OAuth callback failed", error)
       }
     }
   }

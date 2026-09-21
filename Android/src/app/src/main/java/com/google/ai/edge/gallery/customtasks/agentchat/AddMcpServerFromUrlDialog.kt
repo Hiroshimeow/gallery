@@ -57,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -83,6 +84,7 @@ fun AddMcpServerFromUrlDialog(
   val uiState by mcpManagerViewModel.uiState.collectAsState()
   val loading = uiState.loadingMcpServer
   val error = uiState.error
+  val uriHandler = LocalUriHandler.current
 
   val interactionSource = remember { MutableInteractionSource() }
   var textFieldValue by remember { mutableStateOf(TextFieldValue("")) }
@@ -100,8 +102,8 @@ fun AddMcpServerFromUrlDialog(
   }
 
   // Effect to handle the result of adding an MCP server when the loading state changes.
-  LaunchedEffect(loading) {
-    if (isAdding && !loading) {
+  LaunchedEffect(loading, uiState.oauthPending, uiState.oauthAuthorizationUrl) {
+    if (isAdding && !loading && !uiState.oauthPending && uiState.oauthAuthorizationUrl == null) {
       if (error == null) {
         mcpManagerViewModel.clearError()
         onDismissRequest()
@@ -110,6 +112,13 @@ fun AddMcpServerFromUrlDialog(
         isAdding = false
         textFieldValue = textFieldValue.copy(selection = TextRange(0, textFieldValue.text.length))
       }
+    }
+  }
+
+  LaunchedEffect(uiState.oauthAuthorizationUrl) {
+    uiState.oauthAuthorizationUrl?.takeIf { it.isNotBlank() }?.let { authorizationUrl ->
+      uriHandler.openUri(authorizationUrl)
+      mcpManagerViewModel.consumeOAuthAuthorizationUrl()
     }
   }
 
@@ -234,7 +243,6 @@ fun AddMcpServerFromUrlDialog(
                   authType = McpAuth.AuthMethodCase.OAUTH
                   dropdownExpanded = false
                 },
-                enabled = false,
               )
             }
           }
@@ -278,6 +286,14 @@ fun AddMcpServerFromUrlDialog(
               },
             )
           }
+        }
+
+        if (uiState.oauthPending) {
+          Text(
+            "Finish sign-in in your browser. Gallery will connect automatically after authorization.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+          )
         }
 
         if (loading && isAdding) {

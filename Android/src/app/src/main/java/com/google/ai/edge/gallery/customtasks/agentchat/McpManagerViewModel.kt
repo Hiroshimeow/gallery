@@ -43,6 +43,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -54,6 +55,8 @@ data class McpManagerUiState(
   val mcpServers: List<McpServerState> = emptyList(),
   val loadingMcpServer: Boolean = false,
   val error: String? = null,
+  val oauthAuthorizationUrl: String? = null,
+  val oauthPending: Boolean = false,
 )
 
 @HiltViewModel
@@ -62,6 +65,7 @@ class McpManagerViewModel
 constructor(
   private val mcpServersDataStore: DataStore<McpServers>,
   private val userDataDataStore: DataStore<UserData>,
+  private val oauthCoordinator: McpOAuthCoordinator,
 ) : ViewModel(), McpServersProvider {
   override val mcpServers: List<McpServerState>
     get() = uiState.value.mcpServers
@@ -70,6 +74,32 @@ constructor(
   val uiState = _uiState.asStateFlow()
 
   private val httpClient = HttpClient(Android) { install(SSE) }
+
+  init {
+    viewModelScope.launch {
+      oauthCoordinator.completions.collect { completion ->
+        if (completion.serverUrl.isBlank()) {
+          _uiState.update {
+            it.copy(
+              loadingMcpServer = false,
+              oauthPending = false,
+              error = completion.error ?: "OAuth failed",
+            )
+          }
+        } else if (completion.error != null) {
+          _uiState.update {
+            it.copy(
+              loadingMcpServer = false,
+              oauthPending = false,
+              error = completion.error,
+            )
+          }
+        } else {
+          connectOAuthServer(completion.serverUrl)
+        }
+      }
+    }
+  }
 
   /**
    * Loads the persisted MCP servers from the DataStore and initializes their client connections.
@@ -167,7 +197,21 @@ constructor(
             )
           }
           McpAuth.AuthMethodCase.OAUTH -> {
-            currentAuthBuilder.setOauth(McpAuth.OAuth.getDefaultInstance())
+            val authorizationUrl = oauthCoordinator.beginAuthorization(url)
+            mcpServersDataStore.updateData { currentServers ->
+              val filtered = currentServers.mcpServerList.filter { it.url != url }
+              val placeholder = McpServer.newBuilder().setUrl(url).setEnabled(true).build()
+              McpServers.newBuilder().addAllMcpServer(filtered + placeholder).build()
+            }
+            _uiState.update {
+              it.copy(
+                loadingMcpServer = false,
+                oauthAuthorizationUrl = authorizationUrl,
+                oauthPending = true,
+                error = null,
+              )
+            }
+            return@launch
           }
           McpAuth.AuthMethodCase.NONE -> {
             currentAuthBuilder.setNone(true)
@@ -244,14 +288,63 @@ constructor(
     }
   }
 
+  private fun connectOAuthServer(url: String) {
+    _uiState.update { it.copy(loadingMcpServer = true, oauthPending = false, error = null) }
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        val (client, mcpTools) = initializeClientAndLoadTools(url)
+        val serverVersion = client.serverVersion
+        val proto =
+          McpServer.newBuilder()
+            .setUrl(url)
+            .addAllTools(mcpTools)
+            .setEnabled(true)
+            .apply {
+              serverVersion?.name?.let { setName(it) }
+              serverVersion?.version?.let { setVersion(it) }
+              val desc = mcpTools.joinToString(", ") { it.name }
+              if (desc.isNotEmpty()) setDescription("Tools: $desc")
+            }
+            .build()
+        mcpServersDataStore.updateData { current ->
+          val filtered = current.mcpServerList.filter { it.url != url }
+          McpServers.newBuilder().addAllMcpServer(filtered + proto).build()
+        }
+        _uiState.update { current ->
+          val filtered = current.mcpServers.filter { it.mcpServer.url != url }
+          current.copy(
+            mcpServers = filtered + McpServerState(proto, client, null),
+            loadingMcpServer = false,
+            oauthPending = false,
+            error = null,
+          )
+        }
+      } catch (e: Exception) {
+        Log.e(TAG, "OAuth MCP connect failed: $url", e)
+        _uiState.update {
+          it.copy(
+            loadingMcpServer = false,
+            oauthPending = false,
+            error = e.message ?: "OAuth MCP connection failed",
+          )
+        }
+      }
+    }
+  }
+
   /** Clears any connection error. */
   fun clearError() {
     _uiState.update { it.copy(error = null) }
   }
 
+  fun consumeOAuthAuthorizationUrl() {
+    _uiState.update { it.copy(oauthAuthorizationUrl = null) }
+  }
+
   /** Removes an MCP server by its URL from both the current UI state and persistent DataStore. */
   fun removeMcpServer(url: String) {
     viewModelScope.launch(Dispatchers.IO) {
+      oauthCoordinator.remove(url)
       mcpServersDataStore.updateData { currentServers ->
         val filtered = currentServers.mcpServerList.filter { it.url != url }
         McpServers.newBuilder().addAllMcpServer(filtered).build()
@@ -409,19 +502,32 @@ constructor(
           Implementation(name = "google-ai-edge-gallery", version = BuildConfig.VERSION_NAME)
       )
     // Retrieve authentication details from parameter or DataStore and configure the HTTP transport.
-    val resolvedAuth = mcpAuth ?: userDataDataStore.data.first().mcpAuthsMap[url]
+    val normalizedUrl = normalizeResourceUrl(url)
+    val resolvedAuth = mcpAuth ?: userDataDataStore.data.first().mcpAuthsMap[normalizedUrl]
     val transport =
-      if (
-        resolvedAuth != null && resolvedAuth.authMethodCase == McpAuth.AuthMethodCase.REQUEST_HEADER
-      ) {
-        val reqHeader = resolvedAuth.requestHeader
-        StreamableHttpClientTransport(
-          client = httpClient,
-          url = url,
-          requestBuilder = { headers.append(reqHeader.headerName, reqHeader.headerValue) },
-        )
-      } else {
-        StreamableHttpClientTransport(client = httpClient, url = url)
+      when (resolvedAuth?.authMethodCase) {
+        McpAuth.AuthMethodCase.REQUEST_HEADER -> {
+          val reqHeader = resolvedAuth.requestHeader
+          StreamableHttpClientTransport(
+            client = httpClient,
+            url = url,
+            requestBuilder = { headers.append(reqHeader.headerName, reqHeader.headerValue) },
+          )
+        }
+        McpAuth.AuthMethodCase.OAUTH -> {
+          oauthCoordinator.ensureAccessToken(normalizedUrl)
+            ?: error("OAuth sign-in is required for $normalizedUrl")
+          StreamableHttpClientTransport(
+            client = httpClient,
+            url = url,
+            requestBuilder = {
+              oauthCoordinator.currentAccessToken(normalizedUrl)?.let { token ->
+                headers.append("Authorization", "Bearer $token")
+              }
+            },
+          )
+        }
+        else -> StreamableHttpClientTransport(client = httpClient, url = url)
       }
     client.connect(transport)
     val toolsResponse = client.listTools()

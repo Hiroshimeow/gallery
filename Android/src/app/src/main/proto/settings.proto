@@ -88,7 +88,21 @@ message McpAuth {
     string header_value = 2;
   }
 
-  message OAuth {}
+  message OAuth {
+    string issuer = 1;
+    string authorization_endpoint = 2;
+    string token_endpoint = 3;
+    string registration_endpoint = 4;
+    string client_id = 5;
+    string access_token = 6;
+    string refresh_token = 7;
+    int64 expires_at_epoch_seconds = 8;
+    string scope = 9;
+    string resource = 10;
+    string pending_state = 11;
+    string code_verifier = 12;
+    string redirect_uri = 13;
+  }
 
   oneof auth_method {
     bool none = 1;
