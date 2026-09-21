@@ -44,7 +44,7 @@ class OpenAiProviderTest {
   }
 
   @Test
-  fun `compatible provider requires http url and model`() {
+  fun `compatible provider requires http url but can discover models`() {
     val invalidUrl =
       OpenAiProvider(
         id = "bad",
@@ -53,10 +53,10 @@ class OpenAiProviderTest {
         baseUrl = "ftp://host/v1",
         model = "qwen",
       )
-    val missingModel = invalidUrl.copy(baseUrl = "http://host:8000/v1", model = "")
+    val discoveryOnly = invalidUrl.copy(baseUrl = "http://host:8000/v1", model = "")
 
     assertFalse(invalidUrl.validationError().isNullOrEmpty())
-    assertFalse(missingModel.validationError().isNullOrEmpty())
+    assertTrue(discoveryOnly.validationError().isNullOrEmpty())
   }
 
   @Test
@@ -87,6 +87,25 @@ class OpenAiProviderTest {
   }
 
   @Test
+  fun `one endpoint exposes every discovered model to both chat modes`() {
+    val provider =
+      OpenAiProvider(
+        id = "remote",
+        name = "Remote",
+        type = OpenAiProviderType.OPENAI_COMPATIBLE,
+        baseUrl = "http://host:8000/v1",
+        models = listOf("qwen3-32b", "qwen3-vl", "gpt-oss"),
+      )
+
+    assertEquals(3, remoteModelsForTask(BuiltInTaskId.LLM_CHAT, listOf(provider)).size)
+    assertEquals(3, remoteModelsForTask(BuiltInTaskId.LLM_AGENT_CHAT, listOf(provider)).size)
+    assertEquals(
+      listOf("qwen3-32b", "qwen3-vl", "gpt-oss"),
+      remoteModelsForTask(BuiltInTaskId.LLM_CHAT, listOf(provider)).map { it.metadata.remoteModelId },
+    )
+  }
+
+  @Test
   fun `remote models are offered only to ai chat and agent chat`() {
     val provider =
       OpenAiProvider(
@@ -113,12 +132,15 @@ class OpenAiProviderTest {
         model = "qwen-32b",
       )
 
-    val model = provider.toRemoteModel()
+    val model = provider.toRemoteModel("qwen-32b")
 
     assertEquals(RuntimeType.OPENAI_REMOTE, model.backendSpec.runtimeType)
     assertTrue(model.isRemoteOpenAi)
     assertEquals("a5000", model.metadata.remoteProviderId)
     assertEquals("qwen-32b", model.metadata.remoteModelId)
     assertTrue(model.isLlm)
+    assertTrue(model.supportImage)
+    assertTrue(model.supportAudio)
+    assertTrue(model.configs.isEmpty())
   }
 }

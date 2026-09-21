@@ -6,6 +6,32 @@ import org.junit.Test
 
 class OpenAiProtocolTest {
   @Test
+  fun `models response parses all model ids`() {
+    val body = """{"object":"list","data":[{"id":"qwen3-32b"},{"id":"qwen3-vl"},{"id":"gpt-oss"}]}"""
+
+    assertEquals(listOf("qwen3-32b", "qwen3-vl", "gpt-oss"), parseOpenAiModelsResponse(body))
+  }
+
+  @Test
+  fun `multimodal user content serializes text image and wav audio`() {
+    val message =
+      createOpenAiUserMessage(
+        text = "describe this",
+        imageDataUrls = listOf("data:image/jpeg;base64,abc"),
+        audioBase64Wav = listOf("ZGF0YQ=="),
+      )
+    val request = OpenAiChatRequest(model = "omni", messages = listOf(message), stream = true)
+
+    val json = OPENAI_JSON.encodeToString(OpenAiChatRequest.serializer(), request)
+
+    assertTrue(json.contains("\"type\":\"text\""))
+    assertTrue(json.contains("\"type\":\"image_url\""))
+    assertTrue(json.contains("data:image/jpeg;base64,abc"))
+    assertTrue(json.contains("\"type\":\"input_audio\""))
+    assertTrue(json.contains("\"format\":\"wav\""))
+  }
+
+  @Test
   fun `request includes model stream messages and generic mcp tool`() {
     val request =
       OpenAiChatRequest(
