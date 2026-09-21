@@ -6,6 +6,16 @@ import org.junit.Test
 
 class McpOAuthCoordinatorTest {
   @Test
+  fun `www authenticate resource metadata wins discovery`() {
+    val header =
+      "Bearer realm=\"mcp\", resource_metadata=\"https://example.com/.well-known/oauth-protected-resource/mcp\""
+    assertEquals(
+      "https://example.com/.well-known/oauth-protected-resource/mcp",
+      resourceMetadataUrlFromWwwAuthenticate(header),
+    )
+  }
+
+  @Test
   fun `protected resource metadata keeps resource path`() {
     assertEquals(
       "https://device.hcu-lab.me/.well-known/oauth-protected-resource/mcp",

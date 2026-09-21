@@ -17,6 +17,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.Parameters
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
@@ -63,7 +64,11 @@ constructor(private val userDataDataStore: DataStore<UserData>) {
 
   suspend fun beginAuthorization(serverUrl: String): String {
     val resource = normalizeResourceUrl(serverUrl)
-    val protectedResponse = client.get(protectedResourceMetadataUrl(resource))
+    val resourceProbe = client.get(resource)
+    val protectedMetadataUrl =
+      resourceMetadataUrlFromWwwAuthenticate(resourceProbe.headers[HttpHeaders.WWWAuthenticate])
+        ?: protectedResourceMetadataUrl(resource)
+    val protectedResponse = client.get(protectedMetadataUrl)
     check(protectedResponse.status.isSuccess()) {
       "Protected-resource metadata returned HTTP ${protectedResponse.status.value}"
     }
@@ -340,6 +345,15 @@ constructor(private val userDataDataStore: DataStore<UserData>) {
 }
 
 internal fun normalizeResourceUrl(url: String): String = url.trim().trimEnd('/')
+
+internal fun resourceMetadataUrlFromWwwAuthenticate(header: String?): String? {
+  if (header.isNullOrBlank()) return null
+  return Regex("""resource_metadata=\"([^\"]+)\"""", RegexOption.IGNORE_CASE)
+    .find(header)
+    ?.groupValues
+    ?.getOrNull(1)
+    ?.takeIf { it.isNotBlank() }
+}
 
 internal fun protectedResourceMetadataUrl(resourceUrl: String): String {
   val uri = URI(resourceUrl)
