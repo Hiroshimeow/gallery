@@ -300,7 +300,6 @@ fun AgentChatScreen(
     },
     onSkillClicked = { showSkillManagerBottomSheet = true },
     onMcpClicked = { showMcpManagerBottomSheet = true },
-    showMcpPicker = true,
     showImagePicker = true,
     showAudioPicker = true,
     getActiveSkills = {
